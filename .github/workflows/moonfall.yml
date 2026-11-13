@@ -29,7 +29,7 @@ jobs:
       - name: Smoke-test Nginx
         run: |
           docker run --detach --name moonfall-ci --publish 127.0.0.1:8080:80 moonfall:ci
-          curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/ -o /tmp/moonfall.html
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --max-time 5 --retry-delay 1 http://127.0.0.1:8080/ -o /tmp/moonfall.html
           grep -Fq '<title>MOONFALL' /tmp/moonfall.html
           curl --fail --silent --show-error http://127.0.0.1:8080/app.js -o /tmp/moonfall.js
           cmp app.js /tmp/moonfall.js
