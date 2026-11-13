@@ -8,7 +8,7 @@ Home · Worlds · Characters · Stories · Arena · Quests · Collection · Guil
 
 Features include responsive night-sky layouts, original SVG art, interactive character favorites, a tactical arena mini-game, three quests, a crystal balance, browser-local profile and guild choice.
 
-**Scope / honesty:** This is a frontend prototype. The mini-game and points system use local browser storage; they are not secure server-side systems. No real accounts, multiplayer, leaderboards or database exist yet. The musical icon is a placeholder and does not play audio. Character artwork is original illustrative SVG rather than animated 3D models. No third-party anime character assets or official franchise branding are used.
+**Scope / honesty:** This is a frontend prototype. The mini-game and points system use local browser storage; they are not secure server-side systems. No real accounts, multiplayer, leaderboards or database exist yet. Character artwork is original illustrative SVG rather than animated 3D models. No third-party anime character assets or official franchise branding are used.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ Docker configuration listens on port 80 *inside* the container and the run comma
 
 Useful next phases: CI lint + build checks, Compose with PostgreSQL for authenticated users, Kubernetes manifests/Helm, GitOps with Argo CD, OpenTelemetry metrics/tracing and monitored canary deployment.
 
-**Status:** Initial code committed. Real browser QA and live deployment have not been performed yet.
+**Status:** Initial code committed. Browser QA and live deployment are pending.
 
 ## Repository structure
 
