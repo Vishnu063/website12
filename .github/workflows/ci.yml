@@ -91,7 +91,7 @@ jobs:
         run: |
           docker run -d \
             --name field-atlas-ci \
-            -p 127.0.0.1:8080:80 \
+            -p 127.0.0.1:8080:8080 \
             field-atlas:ci
 
       - name: Test homepage
