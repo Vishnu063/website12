@@ -1,4 +1,4 @@
-name: Field Atlas CI
+name: Field Atlas DevSecOps CI
 
 on:
   push:
@@ -11,14 +11,34 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Check out source code
         uses: actions/checkout@v6
 
+      - name: Scan source for secrets
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: '1'
+
       - name: Build Docker image
         run: docker build -t field-atlas:ci .
+
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: field-atlas:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          format: table
+          exit-code: '1'
 
       - name: Start container
         run: docker run -d --name field-atlas-ci -p 127.0.0.1:8080:80 field-atlas:ci
