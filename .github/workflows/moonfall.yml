@@ -1,0 +1,46 @@
+name: Moonfall CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the tested image to Docker Hub
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check JavaScript and build image
+        run: |
+          node --check app.js
+          docker build --tag moonfall:ci .
+      - name: Smoke-test Nginx
+        run: |
+          docker run --detach --name moonfall-ci --publish 127.0.0.1:8080:80 moonfall:ci
+          curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/ -o /tmp/moonfall.html
+          grep -Fq '<title>MOONFALL' /tmp/moonfall.html
+          curl --fail --silent --show-error http://127.0.0.1:8080/app.js -o /tmp/moonfall.js
+          cmp app.js /tmp/moonfall.js
+      - name: Publish tested image
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          : "${DOCKERHUB_TOKEN:?Add the DOCKERHUB_TOKEN repository secret}"
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login --username vishnu063 --password-stdin
+          image="docker.io/vishnu063/moonfall:sha-${GITHUB_SHA}"
+          docker tag moonfall:ci "$image"
+          docker push "$image"
+          printf 'Published `%s`\n' "$image" >> "$GITHUB_STEP_SUMMARY"
