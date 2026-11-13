@@ -9,13 +9,26 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  security-build-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Check out source code
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify SonarQube configuration
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: |
+          : "${SONAR_TOKEN:?Add the SONAR_TOKEN repository secret}"
+          : "${SONAR_ORGANIZATION:?Add the SONAR_ORGANIZATION repository variable}"
+          : "${SONAR_PROJECT_KEY:?Add the SONAR_PROJECT_KEY repository variable}"
 
       - name: Scan source for secrets
         uses: aquasecurity/trivy-action@v0.36.0
@@ -26,10 +39,44 @@ jobs:
           format: table
           exit-code: '1'
 
-      - name: Build Docker image
-        run: docker build -t field-atlas:ci .
+      - name: Analyze code with SonarQube
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e SONAR_TOKEN \
+            -e SONAR_HOST_URL=https://sonarcloud.io \
+            -e SONAR_USER_HOME=/tmp/sonar \
+            -v "$PWD:/usr/src" \
+            sonarsource/sonar-scanner-cli:latest \
+            "-Dsonar.organization=$SONAR_ORGANIZATION" \
+            "-Dsonar.projectKey=$SONAR_PROJECT_KEY" \
+            "-Dsonar.sources=." \
+            "-Dsonar.exclusions=.git/**,.github/**,.cache/**,.scannerwork/**" \
+            "-Dsonar.qualitygate.wait=true" \
+            "-Dsonar.qualitygate.timeout=300"
 
-      - name: Scan Docker image for vulnerabilities
+      - name: Check Dockerfile with Hadolint
+        run: |
+          docker run --rm -i hadolint/hadolint:v2.12.0 \
+            hadolint --failure-threshold error - < Dockerfile
+
+      - name: Check infrastructure configuration
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            bridgecrew/checkov:latest \
+            --directory /src \
+            --framework dockerfile kubernetes terraform \
+            --compact
+
+      - name: Build Docker image
+        run: docker build --pull -t field-atlas:ci .
+
+      - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -40,20 +87,57 @@ jobs:
           format: table
           exit-code: '1'
 
-      - name: Start container
-        run: docker run -d --name field-atlas-ci -p 127.0.0.1:8080:80 field-atlas:ci
-
-      - name: Check homepage
+      - name: Start website for testing
         run: |
-          curl -fsS --retry 10 --retry-all-errors --retry-delay 1 \
-            --max-time 5 http://127.0.0.1:8080/ -o /tmp/field-atlas.html
+          docker run -d \
+            --name field-atlas-ci \
+            -p 127.0.0.1:8080:80 \
+            field-atlas:ci
+
+      - name: Test homepage
+        run: |
+          curl -fsS \
+            --retry 10 \
+            --retry-all-errors \
+            --retry-delay 1 \
+            --max-time 5 \
+            http://127.0.0.1:8080/ \
+            -o /tmp/field-atlas.html
           grep -Fq '<title>Field Atlas' /tmp/field-atlas.html
+
+      - name: Prepare ZAP report directory
+        run: mkdir -p zap-reports
+
+      - name: Scan running website with OWASP ZAP
+        run: |
+          docker run --rm \
+            --network host \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -v "$PWD/zap-reports:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t http://127.0.0.1:8080 \
+            -m 1 \
+            -r zap-report.html \
+            -J zap-report.json \
+            -I
+
+      - name: Save ZAP reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-security-reports
+          path: zap-reports/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Log in to Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
+          : "${DOCKERHUB_TOKEN:?Add the DOCKERHUB_TOKEN repository secret}"
           printf '%s' "$DOCKERHUB_TOKEN" |
             docker login --username vishnu063 --password-stdin
 
@@ -64,3 +148,13 @@ jobs:
           docker tag field-atlas:ci "$IMAGE"
           docker push "$IMAGE"
           echo "Published image: $IMAGE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs field-atlas-ci 2>/dev/null || true
+
+      - name: Clean up
+        if: always()
+        run: |
+          docker rm -f field-atlas-ci 2>/dev/null || true
+          docker logout
